@@ -138,7 +138,7 @@ local function to_table(list)
 			assert(token() == '\r' and token() == '\n', [[Malformated reply: Invalid literal]])
 			local chars = {}
 			for i = 1,n do
-				chars[i] = assert(token(), [[Malformated reply: Unfinished literal]])
+				chars[i] = assert(token(), [[Malformated reply: Unfinished literal: (%d/%d): %q]], i, n, table.concat(chars))
 			end
 			cur[#cur+1] = table.concat(chars)
 		elseif t:match('%s') then
