@@ -34,11 +34,10 @@ local function Set(t)
 	return s
 end
 
-do -- augment assert to use format strings
-	local _assert = assert
-	local function assert(arg, str, ...)
-		_assert(arg, str:format(...))
-	end
+-- augment assert to use format strings
+local _assert = assert
+local function assert(arg, str, ...)
+	_assert(arg, str:format(...))
 end
 
 -- argument checkers.
@@ -109,10 +108,10 @@ local function to_table(list)
 			finish_atom()
 			-- pop table
 			stack[#stack] = nil
-			local t = cur
+			local tmp = cur
 			cur = stack[#stack]
-			if not cur then return t end
-			cur[#cur+1] = t
+			if not cur then return tmp end
+			cur[#cur+1] = tmp
 		elseif t == '[' then
 			-- hack-ish: [] quotes lists
 			atom[#atom+1] = t
@@ -291,7 +290,7 @@ function IMAP:_do_cmd(cmd, ...)
 		if status == 'OK' then
 			return transform_result(lines)
 		elseif status == 'NO' or status == 'BAD' then
-			error(("Command `%s' failed: %s"):format(cmd, msg), 3)
+			error(("Command `%s' failed: %s"):format(cmd:format(...), msg), 3)
 		end
 
 		lines[#lines+1] = line
@@ -415,6 +414,9 @@ local function parse_list_lsub(res, token)
 	for _,r in ipairs(res[token]) do
 		local flags, delim, name = r:match('^(%b()) (%b"") (.+)$')
 		flags = to_table(flags)
+		for _,f in ipairs(flags) do
+			flags[f:sub(2)] = true
+		end
 
 		if name:sub(1,1) == '"' and name:sub(-1) == '"' then
 			name = name:sub(2,-2)
@@ -517,7 +519,7 @@ function IMAP:search(criteria, charset, uid)
 end
 
 -- parses response to fetch() and store() commands
-local function parse_fetch(res, what)
+local function parse_fetch(res)
 	local messages = {}
 	for _, m in ipairs(res.FETCH) do
 		local id, list = m:match("^(%d+) (.*)$")
