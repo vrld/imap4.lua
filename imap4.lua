@@ -34,12 +34,6 @@ local function Set(t)
 	return s
 end
 
--- augment assert to use format strings
-local _assert = assert
-local function assert(arg, str, ...)
-	_assert(arg, str:format(...))
-end
-
 -- argument checkers.
 -- e.g.: assert_arg(1, foo).type('string', 'number')
 --       assert_arg(2, bar).any('one', 2, true)
@@ -79,74 +73,50 @@ local function to_list(tbl)
 	return tbl
 end
 
--- poor mans s-expressions:
 -- make a table out of an IMAP list
-local function to_table(list)
-	local token = coroutine.wrap(function()
-		for c in list:gmatch('.') do coroutine.yield(c) end
-		coroutine.yield(nil)
-	end)
-
-	local stack, cur = {}, {}
-	local atom = {}
-	local function finish_atom()
-		if #atom > 0 then
-			cur[#cur+1] = table.concat(atom)
-			atom = {}
-		end
+local function to_table(s)
+	local stack = {i = 0}
+	local function push(v)
+		local cur = stack[stack.i]
+		cur[#cur+1] = v
 	end
 
-	while true do
-		local t = token()
-		if not t then
-			error([[Malformated reply: Unexpected end of string]])
-		elseif t == '(' then
-			-- push table
-			stack[#stack+1] = {}
-			cur = stack[#stack]
-		elseif t == ')' then
-			finish_atom()
-			-- pop table
-			stack[#stack] = nil
-			local tmp = cur
-			cur = stack[#stack]
-			if not cur then return tmp end
-			cur[#cur+1] = tmp
-		elseif t == '[' then
-			-- hack-ish: [] quotes lists
-			atom[#atom+1] = t
+	local i = 1
+	while i <= #s do
+		local c = s:sub(i,i)
+		if c == '(' then      -- open list
+			stack.i = stack.i + 1
+			stack[stack.i] = {}
+		elseif c == ')' then  -- close list
+			if stack.i == 1 then return stack[stack.i] end
+			stack.i = stack.i - 1
+			push(stack[stack.i+1])
+		elseif c == '[' then  -- quoted list
+			local k = i
+			i = assert(s:find(']', i+1), "Expected token `]', got EOS")
+			push(s:sub(k+1, i-1))
+		elseif c == '"' then  -- quoted string
+			local k = i
 			repeat
-				atom[#atom+1] = assert(token(), [[Malformated reply: Unmatched `[']])
-			until atom[#atom] == ']'
-		elseif t == '"' then
-			-- add string
-			local chars = {}
-			repeat
-				chars[#chars+1] = assert(token(), [[Malformated reply: Unfinished string]])
-			until chars[#chars-1] ~= '\\' and chars[#chars] == '"'
-			chars[#chars] = nil
-			cur[#cur+1] = table.concat(chars)
-		elseif t == '{' then
-			-- add literal
-			local n = {}
-			repeat
-				n[#n+1] = assert(token(), [[Malformated reply: Unfinished literal prelude]])
-			until n[#n] == '}'
-			n[#n] = nil
-			n = tostring(table.concat(n))
-
-			assert(token() == '\r' and token() == '\n', [[Malformated reply: Invalid literal]])
-			local chars = {}
-			for i = 1,n do
-				chars[i] = assert(token(), [[Malformated reply: Unfinished literal: (%d/%d): %q]], i, n, table.concat(chars))
-			end
-			cur[#cur+1] = table.concat(chars)
-		elseif t:match('%s') then
-			finish_atom()
-		else
-			atom[#atom+1] = t
+				i = assert(s:find('"', i+1), "Expected token `\"', got EOS")
+			until s:sub(i-1,i) ~= '\\"'
+			push(s:sub(k+1,i-1))
+		elseif c == '{' then  -- literal
+			local k = assert(s:find('}', i+1), "Expected token `}', got EOS")
+			local n = tonumber(s:sub(i+1,k-1))
+			local sep = s:sub(k+1,k+2)
+			assert(sep == '\r\n', ("Invalid literal: Expected 0x%02x 0x%02x, got 0x%02x 0x%02x"):format(('\r'):byte(1), ('\n'):byte(1), sep:byte(1,-1)))
+			k, i = k+3, k+3+n+1
+			assert(i <= #s, "Invalid literal: Requested more bytes than available")
+			push(s:sub(k,i))
+		elseif c:match('%S') then
+			local k = i
+			i = assert(s:find('[%s%)%[]',i+1), "Expected token <space>, `)' or `[', got EOS") - 1
+			push(s:sub(k,i))
 		end
+		i = i + 1
 	end
+	error("Expected token `)', got EOS:\n"..s)
 end
 
 -- valid commands given a state
@@ -185,7 +155,7 @@ local IMAP = {}
 function IMAP.__index(self, k)
 	local states = commands_allowed[self]
 	if states then
-		assert(states[self.state], "Command `%s' not allowed in state `%s'.", k, self.state)
+		assert(states[self.state], ("Command `%s' not allowed in state `%s'."):format(k, self.state))
 	end
 	return rawget(IMAP, k)
 end
@@ -196,7 +166,7 @@ function IMAP.new(host, port)
 	assert_arg(2, port).type('number', 'nil')
 
 	port = port or 143
-	local s = assert(socket.connect(host, port), "Cannot connect to %s:%u", host, port)
+	local s = assert(socket.connect(host, port), ("Cannot connect to %s:%u"):format(host, port))
 	s:settimeout(5)
 
 	local imap = setmetatable({
@@ -207,67 +177,28 @@ function IMAP.new(host, port)
 		state      = 'not-authenticated'
 	}, IMAP)
 
-	local greeting = imap:_get_line():match("^%*%s+(.*)")
+	local greeting = imap:_receive():match("^%*%s+(.*)")
 	if not greeting then
 		self.socket:close()
-		assert(nil, "Did not receive greeting from %s:%u", host, port)
+		assert(nil, ("Did not receive greeting from %s:%u"):format(host, port))
 	end
 
 	return imap, greeting
 end
 
 -- gets a full line from the socket. may block
-function IMAP:_get_line()
-	local line = {}
+function IMAP:_receive(mode)
+	local r = {}
 	repeat
-		local res, errstate, partial = self.socket:receive('*l')
-		if not res then
-			assert(errstate ~= 'closed', 'Connection to %s:%u closed unexpectedly', self.host, self.port)
-			assert(#partial > 0, 'Connection to %s:%u timed out', self.host, self.port)
-			line[#line+1] = partial
+		local result, errstate, partial = self.socket:receive(mode or '*l')
+		if not result then
+			assert(errstate ~= 'closed', ('Connection to %s:%u closed unexpectedly'):format(self.host, self.port))
+			assert(#partial > 0, ('Connection to %s:%u timed out'):format(self.host, self.port))
+			r[#r+1] = partial
 		end
-		line[#line+1] = res -- does nothing if res is nil
-	until res
-	return table.concat(line)
-end
-
--- Transforms lines into response tables
-local function transform_result(lines)
-	-- merge lines into response blocks
-	local blocks = {}
-	for _, line in ipairs(lines) do
-		local firstchar = line:sub(1,1)
-		if firstchar == '*' then
-			blocks[#blocks+1] = line:sub(3)
-		elseif firstchar ~= '+' then
-			blocks[#blocks] = blocks[#blocks] .. '\r\n' .. line
-		end -- ignore continue request
-	end
-
-	-- transform blocks into response table of the format:
-	-- res = {
-	--    TOKEN1 = {a, b, ...},
-	--    TOKEN2 = {x, y, ...},
-	--    ...
-	-- }
-	local res = setmetatable({}, {__index = function(t,k)
-		local s = {}
-		rawset(t,k,s)
-		return s
-	end})
-	for _, b in ipairs(blocks) do
-		local token, args = b:match('^(%S+) (.*)$')
-		-- whoever thought 'number SP token' was a good idea should be first
-		-- to be placed against the wall when the revolution comes
-		if tonumber(token) ~= nil then
-			local n = token
-			token, args = args:match('^(%S+)%s*(.*)$')
-			args = table.concat({n,args}, ' ')
-		end
-		local t = res[token]
-		t[#t+1] = args
-	end
-	return res
+		r[#r+1] = result -- does nothing if result is nil
+	until result
+	return table.concat(r)
 end
 
 -- invokes a tagged command and returns response blocks
@@ -280,21 +211,47 @@ function IMAP:_do_cmd(cmd, ...)
 	local len   = assert(self.socket:send(data))
 	assert(len == #data, 'Broken connection: Could not send all required data')
 
-	-- receive answer line by line (unparsed)
-	local lines = {}
+	-- receive answer line by line and pack into blocks
+	local blocks = {}
+	local literal_bytes = 0
 	while true do
-		local line = self:_get_line()
-
 		-- return if there was a tagged response
+		if literal_bytes > 0 then
+			blocks[#blocks] = blocks[#blocks] .. '\r\n' .. self:_receive(literal_bytes)
+			literal_bytes = 0
+		end
+
+		local line = self:_receive()
 		local status, msg = line:match('^'..token..' ([A-Z]+) (.*)$')
 		if status == 'OK' then
-			return transform_result(lines)
+			break
 		elseif status == 'NO' or status == 'BAD' then
 			error(("Command `%s' failed: %s"):format(cmd:format(...), msg), 3)
 		end
 
-		lines[#lines+1] = line
+		local firstchar = line:sub(1,1)
+		if firstchar == '*' then
+			blocks[#blocks+1] = line:sub(3)
+			literal_bytes = tonumber(line:match('{(%d+)}$')) or 0
+		elseif firstchar ~= '+' and #line > 0 then
+			blocks[#blocks] = blocks[#blocks] .. '\r\n' .. line
+		end
 	end
+
+	-- transform blocks into response table:
+	-- { TOKEN1 = {arg1.1, arg1.2, ...}, TOKEN2 = {arg2.1, arg2.2, ...} }
+	local res = setmetatable({}, {__index = function(t,k) local s = {}; rawset(t,k,s); return s; end})
+	for i = 1,#blocks do
+		local token, args = blocks[i]:match('^(%S+) (.*)$')
+		if tonumber(token) ~= nil then
+			local n = token
+			token, args = args:match('^(%S+)%s*(.*)$')
+			args = n .. ' ' .. args
+		end
+		local t = res[token]
+		t[#t+1] = args
+	end
+	return res
 end
 
 -- any state
@@ -469,7 +426,7 @@ end
 function IMAP:append(mailbox, message, flags, date)
 	assert_arg(1, mailbox).type('string')
 	assert_arg(2, message).type('string')
-	assert_arg(3, flags).type('table', 'nil')
+	assert_arg(3, flags).type('table', 'string', 'nil')
 	assert_arg(4, date).type('string', 'nil')
 
 	message = ('{%d}\r\n%s'):format(#message, message) -- message literal
@@ -525,9 +482,20 @@ local function parse_fetch(res)
 		local id, list = m:match("^(%d+) (.*)$")
 		list = to_table(list)
 		local msg = {id = id}
-		for i = 1,#list,2 do
-			msg[list[i]] = list[i+1]
-			msg[math.ceil(i/2)] = list[i]
+		local i = 1
+		while i < #list do
+			local key = list[i]
+			local value = list[i+1]
+			if key == 'BODY' then
+				value = {
+					parts = to_table('('..list[i+1]..')'),
+					value = list[i+2]
+				}
+				i = i + 1
+			end
+			msg[key] = value
+			msg[#msg+1] = key
+			i = i + 2
 		end
 		messages[#messages+1] = msg
 	end
@@ -561,12 +529,13 @@ function IMAP:store(mode, flags, sequence, silent, uid)
 	return parse_fetch(res), res
 end
 
-function IMAP:copy(sequence, mailbox)
+function IMAP:copy(sequence, mailbox, uid)
 	assert_arg(1, sequence).type('string', 'number')
 	assert_arg(2, mailbox).type('string')
 
 	sequence = tostring(sequence)
-	return self:_do_cmd('COPY %s %s', sequence, mailbox)
+	uid = uid and 'UID ' or ''
+	return self:_do_cmd('%sCOPY %s %s', uid, sequence, mailbox)
 end
 
 return setmetatable(IMAP, {__call = function(_, ...) return IMAP.new(...) end})
