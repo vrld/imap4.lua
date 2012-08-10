@@ -32,11 +32,27 @@ print(info.exist, info.recent)
 
 -- list info on the 4 most recent mails
 -- see https://tools.ietf.org/html/rfc3501#section-6.4.5
-for _,v in pairs(imap:fetch('BODY.PEEK[HEADER.FIELDS (From Date Subject)]', (info.exist-4)..':*')) do
-	-- v contains the response as mixed, nested table.
-	-- keys are stored in the list part.
-	-- in this example, v[1] = BODY[HEADER.FIELDS ("From" "To" "Date" "Subject")]
-	print(v.id, v[v[1]])
+for _,v in pairs(imap:fetch('UID BODY.PEEK[HEADER.FIELDS (From Date Subject)]', (info.exist-4)..':*')) do
+	-- v contains the response as mixed (possibly nested) table.
+	-- keys are stored in the list part. In this example:
+	--
+	--    v[1] = "UID", v[2] = BODY
+	--
+	-- v[key] holds the value of that part, e.g.
+	--
+	--    v.UID = 10
+	--
+	-- v.BODY is the only exception and returns a table of the format
+	--
+	--    {parts = part-table, value = response}
+	--
+	-- for example:
+	--
+	--    v.BODY = {
+	--        parts = {"HEADER.FIELDS", {"From", "Date", "Subject"}},
+	--        value = "From: Foo <foo@bar.baz>\r\nDate:..."
+	--    }
+	print(v.id, v.UID, v.BODY.value)
 end
 
 -- close connection
