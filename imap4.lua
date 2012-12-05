@@ -538,4 +538,61 @@ function IMAP:copy(sequence, mailbox, uid)
 	return self:_do_cmd('%sCOPY %s %s', uid, sequence, mailbox)
 end
 
+-- utility library
+IMAP.util = {}
+
+-- transforms t = {k1, v1, k2, v2, ...} to r = {[k1] = v1, [k2] = v2, ...}
+function IMAP.util.collapse_list(t)
+	if t == 'NIL' then return {} end
+	local r = {}
+	for i = 1,#t,2 do
+		r[t[i]] = t[i+1]
+	end
+	return r
+end
+
+-- transforms bodystructure response in a more usable format
+function IMAP.util.get_bodystructure(t, part)
+	local function tnil(s) return s == 'NIL' and nil or s end
+
+	local r = {part = part}
+
+	if type(t[1]) == 'table' then
+		local i = 1
+		while type(t[i]) == 'table' do
+			r[i] = IMAP.util.get_bodystructure(t[i], (part and part .. '.' or '') .. i)
+			i = i + 1
+		end
+		r.type        = t[i]
+		r.params      = IMAP.util.collapse_list(t[i+1])
+		r.disposition = tnil(t[i+2])
+		r.language    = tnil(t[i+3])
+		r.location    = tnil(t[i+4])
+		return r
+	end
+
+	r.type        = t[1]
+	r.subtype     = t[2]
+	r.params      = IMAP.util.collapse_list(t[3])
+	r.id          = tnil(t[4])
+	r.description = tnil(t[5])
+	r.encoding    = tnil(t[6])
+	r.size        = tonumber(t[7])
+
+	local line_field = 8
+	if r.type:lower() == 'message' and r.subtype:lower() == 'rfc822' then
+		r.envelope = tnil(t[8])
+		r.body     = tnil(t[9])
+		line_field = 10
+	end
+
+	r.lines       = tonumber(t[line_field])
+	r.md5         = tnil(t[line_field + 1])
+	r.disposition = tnil(t[line_field + 2])
+	r.language    = tnil(t[line_field + 3])
+	r.location    = tnil(t[line_field + 4])
+
+	return r
+end
+
 return setmetatable(IMAP, {__call = function(_, ...) return IMAP.new(...) end})
