@@ -2,51 +2,63 @@ require 'luarocks.require'
 
 local imap4 = require 'imap4'
 
--- if in doubt, see RFC 3501:
+-- If in doubt, see RFC 3501:
 -- https://tools.ietf.org/html/rfc3501#section-6
 
--- create new imap4 connection
--- port is optional and defaults to 143
-local imap = imap4('localhost', 143)
+-- Create new imap4 connection.
+-- Port is optional and defaults to 143.
+local connection = imap4('localhost', 143)
 
--- print the servers capabilities
-print(table.concat(imap:capability(), ', '))
+-- If you are connecting to gmail, yahoo or any other server that needs a SSL
+-- connection before accepting commands, uncomment this line:
+--
+-- connection:enabletls{protocol = 'sslv3'}
+--
+-- You can skip this step by creating the connection using
+--
+-- local connection = imap4('imap.gmail.com', 993, {protocol = 'sslv3'})
 
--- make sure we can do what we want to
-assert(imap:isCapable('IMAP4rev1'))
+-- Print the servers capabilities.
+print(table.concat(connection:capability(), ', '))
 
--- login. warning: this is sent in plaintext!
--- either tunnel this over ssh, or use tls: imap:starttls(params)
-imap:login(user, pass)
+-- Make sure we can do what we came for.
+assert(connection:isCapable('IMAP4rev1'))
 
--- imap:lsub() lists all subscribed mailboxes.
-for mb, info in pairs(imap:lsub()) do
-	-- imap:status(mailbox, items) queries status of a mailbox
-	local stat = imap:status(mb, {'MESSAGES', 'RECENT', 'UNSEEN'})
+-- Login. Warning: The credentials are sent in plaintext unless you
+-- tunnel the connection over ssh, or use SSL (either via the method shown
+-- above or calling connection:starttls(params) before logging in).
+connection:login(user, pass)
+
+-- connection:lsub() lists all subscribed mailboxes.
+for mb, info in pairs(connection:lsub()) do
+	-- connection:status(mailbox, items) queries status of a mailbox.
+	-- Note: The mailbox name may contain unescaped whitespace. You are
+	--       responsible to escape it properly - try ("%q"):format(mb).
+	local stat = connection:status(mb, {'MESSAGES', 'RECENT', 'UNSEEN'})
 	print(mb, stat.MESSAGES, stat.RECENT, stat.UNSEEN)
 end
 
--- select INBOX with read only permissions
-local info = imap:examine('INBOX')
+-- Select INBOX with read only permissions.
+local info = connection:examine('INBOX')
 print(info.exist, info.recent)
 
--- list info on the 4 most recent mails
--- see https://tools.ietf.org/html/rfc3501#section-6.4.5
-for _,v in pairs(imap:fetch('UID BODY.PEEK[HEADER.FIELDS (From Date Subject)]', (info.exist-4)..':*')) do
-	-- v contains the response as mixed (possibly nested) table.
-	-- keys are stored in the list part. In this example:
+-- List info on the 4 most recent mails.
+-- See https://tools.ietf.org/html/rfc3501#section-6.4.5
+for _,v in pairs(connection:fetch('UID BODY.PEEK[HEADER.FIELDS (From Date Subject)]', (info.exist-4)..':*')) do
+	-- `v' contains the response as mixed (possibly nested) table.
+	-- Keys are stored in the list part. In this example:
 	--
 	--    v[1] = "UID", v[2] = BODY
 	--
-	-- v[key] holds the value of that part, e.g.
+	-- `v[key]' holds the value of that part, e.g.
 	--
 	--    v.UID = 10
 	--
-	-- v.BODY is the only exception and returns a table of the format
+	-- `v.BODY' is the only exception and returns a table of the format
 	--
 	--    {parts = part-table, value = response}
 	--
-	-- for example:
+	-- For example:
 	--
 	--    v.BODY = {
 	--        parts = {"HEADER.FIELDS", {"From", "Date", "Subject"}},
@@ -56,4 +68,4 @@ for _,v in pairs(imap:fetch('UID BODY.PEEK[HEADER.FIELDS (From Date Subject)]', 
 end
 
 -- close connection
-imap:logout()
+connection:logout()
