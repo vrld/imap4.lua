@@ -119,46 +119,9 @@ local function to_table(s)
 	error("Expected token `)', got EOS:\n"..s)
 end
 
--- valid commands given a state
-local commands_allowed = {
-	capability   = Set{'not-authenticated', 'authenticated', 'selected'},
-	noop         = Set{'not-authenticated', 'authenticated', 'selected'},
-	logout       = Set{'not-authenticated', 'authenticated', 'selected'},
-	starttls     = Set{'not-Authenticated'},
-	authenticate = Set{'not-Authenticated'},
-	login        = Set{'not-Authenticated'},
-	select       = Set{'authenticated', 'selected'},
-	examine      = Set{'authenticated', 'selected'},
-	create       = Set{'authenticated', 'selected'},
-	delete       = Set{'authenticated', 'selected'},
-	rename       = Set{'authenticated', 'selected'},
-	subscribe    = Set{'authenticated', 'selected'},
-	unsubscribe  = Set{'authenticated', 'selected'},
-	list         = Set{'authenticated', 'selected'},
-	lsub         = Set{'authenticated', 'selected'},
-	status       = Set{'authenticated', 'selected'},
-	append       = Set{'authenticated', 'selected'},
-	check        = Set{'selected'},
-	close        = Set{'selected'},
-	expunge      = Set{'selected'},
-	search       = Set{'selected'},
-	fetch        = Set{'selected'},
-	store        = Set{'selected'},
-	copy         = Set{'selected'},
-	uid          = Set{'selected'},
-}
-
 -- imap4 connection
 local IMAP = {}
-
--- checks if command is valid in current state
-function IMAP.__index(self, k)
-	local states = commands_allowed[self]
-	if states then
-		assert(states[self.state], ("Command `%s' not allowed in state `%s'."):format(k, self.state))
-	end
-	return rawget(IMAP, k)
-end
+IMAP.__index = IMAP
 
 -- constructor
 function IMAP.new(host, port, tls_params)
@@ -174,7 +137,6 @@ function IMAP.new(host, port, tls_params)
 		port       = port,
 		socket     = s,
 		next_token = token_generator(),
-		state      = 'not-authenticated'
 	}, IMAP)
 
 	-- check the server greeting before executing the first command
@@ -326,7 +288,6 @@ end
 -- plain text login. do not use unless connection is secure (i.e. TLS or SSH tunnel)
 function IMAP:login(user, pass)
 	local res = self:_do_cmd('LOGIN %s %s', user, pass)
-	self.state = 'authenticated'
 	return res
 end
 
@@ -345,17 +306,13 @@ end
 -- { flags = {string...}, exist = number, recent = number}
 function IMAP:select(mailbox)
 	-- if this fails we go back to authenticated state
-	if self.state == 'selected' then self.state = 'authenticated' end
 	local res = self:_do_cmd('SELECT %s', mailbox)
-	self.state = 'selected'
 	return parse_select_examine(res), res
 end
 
 -- same as IMAP:select, except that the mailbox is set to read-only
 function IMAP:examine(mailbox)
-	if self.state == 'selected' then self.state = 'authenticated' end
 	local res = self:_do_cmd('SELECT %s', mailbox)
-	self.state = 'selected'
 	return parse_select_examine(res), res
 end
 
@@ -466,7 +423,6 @@ end
 -- 'authenticated' state.
 function IMAP:close()
 	local res = self:_do_cmd('CLOSE')
-	self.state = 'authenticated'
 	return res
 end
 
