@@ -161,7 +161,7 @@ function IMAP.__index(self, k)
 end
 
 -- constructor
-function IMAP.new(host, port)
+function IMAP.new(host, port, tls_params)
 	assert_arg(1, host).type('string')
 	assert_arg(2, port).type('number', 'nil')
 
@@ -177,13 +177,36 @@ function IMAP.new(host, port)
 		state      = 'not-authenticated'
 	}, IMAP)
 
-	local greeting = imap:_receive():match("^%*%s+(.*)")
-	if not greeting then
-		self.socket:close()
-		assert(nil, ("Did not receive greeting from %s:%u"):format(host, port))
+	-- check the server greeting before executing the first command
+	imap._do_cmd = function(self, ...)
+		self._do_cmd = IMAP._do_cmd
+		local greeting = imap:_receive():match("^%*%s+(.*)")
+		if not greeting then
+			self.socket:close()
+			assert(nil, ("Did not receive greeting from %s:%u"):format(host, port))
+		end
+		return self:_do_cmd(...)
 	end
 
-	return imap, greeting
+	-- shortcut to enabling a secure connection
+	if tls_params then
+		imap:enabletls(tls_params)
+	end
+
+	return imap
+end
+
+-- Enable ssl connection. Some servers *cough*gmail*cough* dont honor the
+-- standard and close the connection before letting you send any command,
+-- including STARTTLS.
+function IMAP:enabletls(tls_params)
+	assert_arg(1, tls_params).type('table', 'nil')
+	tls_params = tls_params or {protocol = 'sslv3'}
+	tls_params.mode = tls_params.mode or 'client'
+
+	local ssl = require 'ssl'
+	self.socket = assert(ssl.wrap(self.socket, tls_params))
+	return self.socket:dohandshake()
 end
 
 -- gets a full line from the socket. may block
@@ -290,12 +313,9 @@ end
 -- start TLS connection. requires luasec. see luasec documentation for
 -- infos on what tls_params should be.
 function IMAP:starttls(tls_params)
-	assert_arg(1, tls_params).type('table')
 	assert(self:isCapable('STARTTLS'))
 	local res = self:_do_cmd('STARTTLS')
-	local ssl = require 'ssl'
-	self.socket = ssl.wrap(self.socket, tls_params)
-	self.socket:dohandshake()
+	self:enabletls(tls_params)
 	return res
 end
 
