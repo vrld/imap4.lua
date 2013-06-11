@@ -233,6 +233,7 @@ function IMAP:_do_cmd(cmd, ...)
 			token, args = args:match('^(%S+)%s*(.*)$')
 			args = n .. ' ' .. args
 		end
+		if not token then token = blocks[i] end
 		local t = res[token]
 		t[#t+1] = args
 	end
