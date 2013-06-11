@@ -464,7 +464,7 @@ local function parse_fetch(res)
 			local value = list[i+1]
 			if key == 'BODY' then
 				value = {
-					parts = to_table('('..list[i+1]..')'),
+					parts = (type(value) == 'string') and to_table('('..value..')') or value,
 					value = list[i+2]
 				}
 				i = i + 1
@@ -483,7 +483,7 @@ function IMAP:fetch(what, sequence, uid)
 	assert_arg(2, sequence).type('string', 'nil')
 
 	what = to_list(what or '(UID BODY[HEADER.FIELDS (DATE FROM SUBJECT)])')
-	sequence = tostring(sequence) or '1:*'
+	sequence = sequence and tostring(sequence) or '1:*'
 	uid = uid and 'UID ' or ''
 
 	local res = self:_do_cmd('%sFETCH %s %s', uid, sequence, what)
