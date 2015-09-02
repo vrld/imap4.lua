@@ -390,7 +390,7 @@ function IMAP:status(mailbox, names)
 	names = to_list(names or '(MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN)')
 	local res = self:_do_cmd('STATUS %s %s', mailbox, names)
 
-	local list = to_table(assert(res.STATUS[1]:match('(%b())$'), 'Invalid response'))
+	local list = to_table(assert(res.STATUS[1]:match('(%b())%s*$'), 'Invalid response'))
 	assert(#list % 2 == 0, "Invalid response size")
 
 	local status = {}
