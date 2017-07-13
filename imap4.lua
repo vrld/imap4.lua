@@ -186,13 +186,14 @@ function IMAP:_receive(mode)
 	return table.concat(r)
 end
 
--- invokes a tagged command and returns response blocks
-function IMAP:_do_cmd(cmd, ...)
+function IMAP:_do_cmd_raw(stop_pattern, token, resp_token, cmd, ...)
 	--assert(self.socket, 'Connection closed')
-	local token = self:next_token()
 
 	-- send request
-	local data  = token .. ' ' .. cmd:format(...) .. '\r\n'
+	local data  = cmd:format(...) .. '\r\n'
+        if token ~= nil then
+                data = token .. ' ' .. data
+        end
 	local len   = assert(self.socket:send(data))
 	assert(len == #data, 'Broken connection: Could not send all required data')
 
@@ -207,11 +208,11 @@ function IMAP:_do_cmd(cmd, ...)
 		end
 
 		local line = self:_receive()
-		local status, msg = line:match('^'..token..' ([A-Z]+) (.*)$')
+		local status, msg = line:match('^'..resp_token..' ([A-Z]+) (.*)$')
 		if status == 'OK' then
 			break
 		elseif status == 'NO' or status == 'BAD' then
-			error(("Command `%s' failed: %s"):format(cmd:format(...), msg), 3)
+			error(("Command `%s' failed: %s"):format(cmd:format(...), msg), 4)
 		end
 
 		local firstchar = line:sub(1,1)
@@ -221,6 +222,10 @@ function IMAP:_do_cmd(cmd, ...)
 		elseif firstchar ~= '+' and #line > 0 then
 			blocks[#blocks] = blocks[#blocks] .. '\r\n' .. line
 		end
+
+                if stop_pattern and line:match(stop_pattern) then
+                        break
+                end
 	end
 
 	-- transform blocks into response table:
@@ -239,6 +244,12 @@ function IMAP:_do_cmd(cmd, ...)
 	end
         setmetatable(res, nil)
 	return res
+end
+
+-- invokes a tagged command and returns response blocks
+function IMAP:_do_cmd(cmd, ...)
+	local token = self:next_token()
+        return self:_do_cmd_raw(nil, token, token, cmd, ...)
 end
 
 -- any state
@@ -362,7 +373,7 @@ local function parse_list_lsub(res, token)
 	return mailboxes
 end
 
--- list mailboxes, where `mailbox' is a mailbox name with possible 
+-- list mailboxes, where `mailbox' is a mailbox name with possible
 -- wildcards and `ref' is a reference name. Default parameters are:
 -- mailbox = '*' (match all) and ref = '""' (no reference name)
 -- See RFC3501 Sec 6.3.8 for details.
@@ -514,6 +525,19 @@ function IMAP:copy(sequence, mailbox, uid)
 	sequence = tostring(sequence)
 	uid = uid and 'UID ' or ''
 	return self:_do_cmd('%sCOPY %s %s', uid, sequence, mailbox)
+end
+
+-- enter idle state
+function IMAP:idle(token)
+	local idling_pattern = '^%+%s+idling%s*$'
+        return self:_do_cmd_raw(idling_pattern, token, token, 'IDLE')
+end
+
+-- exit idle state.
+-- resp_token: the expected response token; pass the token used in
+--             the IDLE request
+function IMAP:idle_done(resp_token)
+        return self:_do_cmd_raw(nil, nil, resp_token, 'DONE')
 end
 
 -- utility library

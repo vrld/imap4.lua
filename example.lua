@@ -69,5 +69,29 @@ for _,v in pairs(connection:fetch('(UID BODY.PEEK[HEADER.FIELDS (From Date Subje
 	print(v.id, v.UID, v.BODY.value)
 end
 
+-- idle till new mail arrives
+-- see https://tools.ietf.org/html/rfc2177
+local tok = connection:next_token()
+connection:idle(tok)
+local resp_pattern = '^%*%s+%d+%s+EXISTS%s*$'
+local tim = os.time()
+while true do
+    local line = connection:_receive()
+    print('matching', line)
+    local match = line:match(resp_pattern)
+    print('match',match)
+    if  match then
+        -- play some sound
+        os.execute('aplay ~/gnubiff-2.2.17/sound/coin.wav')
+    end
+    -- remove this test to spin in the idle state forever
+    if os.time() - tim > 120 then
+        break
+    end
+end
+
+-- exit idle state
+connection:idle_done(tok)
+
 -- close connection
 connection:logout()
