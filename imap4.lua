@@ -237,6 +237,7 @@ function IMAP:_do_cmd(cmd, ...)
 		local t = res[token]
 		t[#t+1] = args
 	end
+        setmetatable(res, nil)
 	return res
 end
 
