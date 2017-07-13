@@ -16,7 +16,7 @@ local connection = imap4('localhost', 143)
 --
 -- You can skip this step by creating the connection using
 --
--- local connection = imap4('imap.gmail.com', 993, {protocol = 'sslv3'})
+-- local connection = imap4('imap.gmail.com', 993, {protocol = 'tlsv1_2'})
 
 -- Print the servers capabilities.
 print(table.concat(connection:capability(), ', '))
