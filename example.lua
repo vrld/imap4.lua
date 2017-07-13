@@ -46,7 +46,7 @@ print(info.exist, info.recent)
 
 -- List info on the 4 most recent mails.
 -- See https://tools.ietf.org/html/rfc3501#section-6.4.5
-for _,v in pairs(connection:fetch('UID BODY.PEEK[HEADER.FIELDS (From Date Subject)]', (info.exist-4)..':*')) do
+for _,v in pairs(connection:fetch('(UID BODY.PEEK[HEADER.FIELDS (From Date Subject)])', (info.exist-4)..':*')) do
 	-- `v' contains the response as mixed (possibly nested) table.
 	-- Keys are stored in the list part. In this example:
 	--
