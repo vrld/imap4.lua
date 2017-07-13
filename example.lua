@@ -16,7 +16,7 @@ local connection = imap4('localhost', 143)
 --
 -- You can skip this step by creating the connection using
 --
--- local connection = imap4('imap.gmail.com', 993, {protocol = 'sslv3'})
+-- local connection = imap4('imap.gmail.com', 993, {protocol = 'tlsv1_2'})
 
 -- Print the servers capabilities.
 print(table.concat(connection:capability(), ', '))
@@ -34,8 +34,10 @@ for mb, info in pairs(connection:lsub()) do
 	-- connection:status(mailbox, items) queries status of a mailbox.
 	-- Note: The mailbox name may contain unescaped whitespace. You are
 	--       responsible to escape it properly - try ("%q"):format(mb).
-	local stat = connection:status(mb, {'MESSAGES', 'RECENT', 'UNSEEN'})
-	print(mb, stat.MESSAGES, stat.RECENT, stat.UNSEEN)
+        if not info.flags["Noselect"] then
+            local stat = connection:status(mb, {'MESSAGES', 'RECENT', 'UNSEEN'})
+            print(mb, stat.MESSAGES, stat.RECENT, stat.UNSEEN)
+        end
 end
 
 -- Select INBOX with read only permissions.
@@ -44,7 +46,7 @@ print(info.exist, info.recent)
 
 -- List info on the 4 most recent mails.
 -- See https://tools.ietf.org/html/rfc3501#section-6.4.5
-for _,v in pairs(connection:fetch('UID BODY.PEEK[HEADER.FIELDS (From Date Subject)]', (info.exist-4)..':*')) do
+for _,v in pairs(connection:fetch('(UID BODY.PEEK[HEADER.FIELDS (From Date Subject)])', (info.exist-4)..':*')) do
 	-- `v' contains the response as mixed (possibly nested) table.
 	-- Keys are stored in the list part. In this example:
 	--
@@ -66,6 +68,30 @@ for _,v in pairs(connection:fetch('UID BODY.PEEK[HEADER.FIELDS (From Date Subjec
 	--    }
 	print(v.id, v.UID, v.BODY.value)
 end
+
+-- idle till new mail arrives
+-- see https://tools.ietf.org/html/rfc2177
+local tok = connection:next_token()
+connection:idle(tok)
+local resp_pattern = '^%*%s+%d+%s+EXISTS%s*$'
+local tim = os.time()
+while true do
+    local line = connection:_receive()
+    print('matching', line)
+    local match = line:match(resp_pattern)
+    print('match',match)
+    if  match then
+        -- play some sound
+        os.execute('aplay ~/gnubiff-2.2.17/sound/coin.wav')
+    end
+    -- remove this test to spin in the idle state forever
+    if os.time() - tim > 120 then
+        break
+    end
+end
+
+-- exit idle state
+connection:idle_done(tok)
 
 -- close connection
 connection:logout()
