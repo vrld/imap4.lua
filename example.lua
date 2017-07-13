@@ -34,8 +34,10 @@ for mb, info in pairs(connection:lsub()) do
 	-- connection:status(mailbox, items) queries status of a mailbox.
 	-- Note: The mailbox name may contain unescaped whitespace. You are
 	--       responsible to escape it properly - try ("%q"):format(mb).
-	local stat = connection:status(mb, {'MESSAGES', 'RECENT', 'UNSEEN'})
-	print(mb, stat.MESSAGES, stat.RECENT, stat.UNSEEN)
+        if not info.flags["Noselect"] then
+            local stat = connection:status(mb, {'MESSAGES', 'RECENT', 'UNSEEN'})
+            print(mb, stat.MESSAGES, stat.RECENT, stat.UNSEEN)
+        end
 end
 
 -- Select INBOX with read only permissions.
